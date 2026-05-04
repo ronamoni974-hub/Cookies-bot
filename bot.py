@@ -5,7 +5,7 @@ import time
 from telebot import types
 from bs4 import BeautifulSoup as soup
 
-# Render-এ এনভায়রনমেন্ট ভেরিয়েবল হিসেবে BOT_TOKEN সেট করবেন
+# Render-এ এনভায়রনমেন্ট ভেরিয়েবল হিসেবে BOT_TOKEN সেট করা থাকতে হবে
 TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 
@@ -19,20 +19,6 @@ def get_fb_headers():
         'content-type': 'application/x-www-form-urlencoded',
         'origin': 'https://m.facebook.com',
         'referer': 'https://m.facebook.com/',
-    }
-
-def get_ig_headers():
-    return {
-        'host': 'www.instagram.com',
-        'accept': '*/*',
-        'content-type': 'application/x-www-form-urlencoded',
-        'origin': 'https://www.instagram.com',
-        'referer': 'https://www.instagram.com/',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'x-csrftoken': 'CW2Q00bvaKhSGobrrr0Q1U', # আপনার দেওয়া টোকেন 
-        'x-ig-app-id': '936619743392459',
-        'x-instagram-ajax': '1012029991',
-        'x-requested-with': 'XMLHttpRequest',
     }
 
 # --- Login Logic Functions ---
@@ -76,16 +62,39 @@ def fb_login_logic(email, password):
 
 def ig_login_logic(email, password):
     session = requests.Session()
+    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    
     try:
+        # ডায়নামিক CSRF টোকেন ফেচ করা
+        req = session.get('https://www.instagram.com/', headers={'User-Agent': user_agent}, timeout=30)
+        csrf_token = session.cookies.get('csrftoken')
+        
+        if not csrf_token:
+            return "❌ এরর: ইন্সটাগ্রাম থেকে সিকিউরিটি টোকেন (CSRF) পাওয়া যায়নি।"
+
+        ig_headers = {
+            'User-Agent': user_agent,
+            'x-csrftoken': csrf_token,
+            'x-ig-app-id': '936619743392459',
+            'x-instagram-ajax': '1012029991',
+            'x-requested-with': 'XMLHttpRequest',
+            'origin': 'https://www.instagram.com',
+            'referer': 'https://www.instagram.com/',
+        }
+
+        # সঠিক টাইমস্ট্যাম্প জেনারেট করা
+        current_time = int(time.time())
+        enc_password = f'#PWD_INSTAGRAM_BROWSER:0:{current_time}:{password}'
+
         data = {
-            'enc_password': f'#PWD_INSTAGRAM_BROWSER:0:&:{password}',
+            'enc_password': enc_password,
             'optIntoOneTap': 'false',
             'queryParams': '{}',
             'username': email,
         }
         
         response = session.post('https://www.instagram.com/api/v1/web/accounts/login/ajax/', 
-                                headers=get_ig_headers(), data=data, timeout=30)
+                                headers=ig_headers, data=data, timeout=30)
         
         cookies = session.cookies.get_dict()
         
@@ -93,9 +102,9 @@ def ig_login_logic(email, password):
             cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
             return f"✅ **Instagram লগিন সফল!**\n\n🆔 **User ID:** `{cookies['ds_user_id']}`\n\n🍪 **Cookies:**\n`{cookie_str}`"
         elif '"authenticated":false' in response.text:
-            return "❌ **লগিন ফেইল!** আপনার ইমেইল বা পাসওয়ার্ড ভুল।"
+            return "❌ **লগিন ফেইল!** আপনার ইমেইল বা পাসওয়ার্ড ভুল অথবা ইন্সটাগ্রাম আইপি ব্লক করেছে।"
         else:
-            return "⚠️ **লগিন ফেইল!** কুকিজ পাওয়া যায়নি। একাউন্ট ব্লক হতে পারে অথবা টু-ফ্যাক্টর অন করা আছে।"
+            return "⚠️ **লগিন ফেইল!** কুকিজ পাওয়া যায়নি। টু-ফ্যাক্টর (2FA) অন থাকতে পারে অথবা একাউন্ট ব্লক।"
             
     except Exception as e:
         return f"❌ এরর: {str(e)}"
@@ -110,7 +119,7 @@ def welcome(message):
     markup.add(btn1, btn2)
     
     bot.send_message(message.chat.id, 
-                     f"👋 **স্বাগতম!**\n\nএটি একটি সোশ্যাল লগিন কুকিজ এক্সট্রাক্টর বট। নিচের বাটন থেকে আপনার প্লাটফর্ম সিলেক্ট করুন।", 
+                     f"👋 **স্বাগতম {message.from_user.first_name}!**\n\nএটি একটি সোশ্যাল লগিন কুকিজ এক্সট্রাক্টর বট। নিচের বাটন থেকে আপনার প্লাটফর্ম সিলেক্ট করুন।", 
                      reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -125,11 +134,12 @@ def callback_query(call):
 
 def process_login(message, platform):
     try:
+        # ইনপুট ভ্যালিডেশন
         if ':' not in message.text:
             bot.reply_to(message, "❌ ভুল ফরম্যাট! দয়া করে `email:password` এভাবে পাঠান।")
             return
             
-        credentials = message.text.split(':')
+        credentials = message.text.split(':', 1) # শুধুমাত্র প্রথম ':' এ স্প্লিট করবে
         email = credentials[0].strip()
         password = credentials[1].strip()
         
@@ -145,7 +155,8 @@ def process_login(message, platform):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ একটি সমস্যা হয়েছে: {str(e)}")
 
-# Render-এ বট চালু রাখার জন্য
+# Render বা সার্ভারে বট চালু রাখার জন্য
 if __name__ == "__main__":
     print("Bot is running...")
-    bot.infinity_polling()
+    # Error হলে যেন বট বন্ধ না হয় তাই infinity_polling
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
