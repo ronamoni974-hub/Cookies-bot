@@ -6,7 +6,7 @@ from telebot import types
 from bs4 import BeautifulSoup as soup
 
 # Render-এ এনভায়রনমেন্ট ভেরিয়েবল হিসেবে BOT_TOKEN সেট করবেন
-TOKEN = os.getenv('8789592665:AAFX1Nlx6ArxpR3kgbTNWIerVN9V6GyeCMc')
+TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 
 # --- Headers Functions ---
